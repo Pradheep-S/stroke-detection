@@ -1,0 +1,7 @@
+pandas
+scikit-learn
+matplotlib
+imbalanced-learn
+tensorflow
+
+# Optional: add any other packages you use (e.g., numpy, seaborn)
