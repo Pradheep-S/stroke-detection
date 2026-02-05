@@ -116,8 +116,11 @@ function classNames(...values) {
   return values.filter(Boolean).join(" ");
 }
 
-function formatProbability(value) {
-  return `${(value * 100).toFixed(1)}%`;
+function calculateRiskScore(probability) {
+  // Convert probability to risk score (0-100%)
+  // Apply non-linear scaling to spread values more intuitively
+  const scaled = Math.pow(probability, 0.7) * 100;
+  return Math.min(100, scaled).toFixed(1);
 }
 
 export default function App() {
@@ -319,10 +322,10 @@ export default function App() {
                         </div>
                         <div className="text-right">
                           <p className="text-xs uppercase tracking-[0.2em] text-ink-400">
-                            Probability
+                            Risk Score
                           </p>
                           <p className="text-lg font-semibold text-tide-700">
-                            {formatProbability(value.probability)}
+                            {calculateRiskScore(value.probability)}%
                           </p>
                         </div>
                       </div>
