@@ -3,5 +3,8 @@ scikit-learn
 matplotlib
 imbalanced-learn
 tensorflow
+fastapi
+uvicorn
+pydantic
 
 # Optional: add any other packages you use (e.g., numpy, seaborn)
