@@ -1,42 +1,3 @@
-"""
-STROKE PREDICTION: DEEP LEARNING APPROACH
-
-PROBLEM STATEMENT:
-Stroke is a leading cause of disability globally. Early risk prediction enables
-preventive intervention. This project develops a neural network model for
-binary classification using the Kaggle Stroke Dataset (highly imbalanced: ~5% positive).
-
-PROJECT STRUCTURE:
-1. BASELINE MODELS: Classical ML (Logistic Regression, Random Forest)
-   - Purpose: Benchmark comparison only
-   - Note: Not optimized for recall; included for completeness
-   
-2. PROPOSED MODEL: Deep Learning (Neural Network)
-   - Purpose: Primary model for deployment
-   - Advantages:
-     * Handles non-linear relationships in medical data
-     * Flexible architecture tuning
-     * Better recall with proper imbalance handling and threshold tuning
-     * Feature interaction learning
-
-3. ABLATION STUDY: Systematic comparison of design choices
-   - Focal Loss vs Binary Cross-Entropy
-   - SMOTE vs Class Weighting vs Combined
-   - Dropout regularization impact
-
-4. INTERPRETABILITY: Feature importance and sensitivity analysis
-   - Clinical transparency and trust
-   - Regulatory compliance (explain predictions)
-
-EVALUATION FOCUS:
-- Recall (primary): How many stroke cases do we catch?
-- Precision: How many of our predictions are correct?
-- F1-Score: Balanced metric
-- ROC-AUC: Threshold-independent performance
-- PR-AUC: Preferred for imbalanced datasets
-- Threshold tuning: Medical-optimal decision boundary
-"""
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -259,9 +220,5 @@ from interpretability import plot_feature_importance
 fig = plot_feature_importance(interpretability_results['importance'], top_k=10)
 plt.savefig('results/feature_importance.png', dpi=150, bbox_inches='tight')
 plt.show()
-
-# ============================================================================
-# FINAL CONCLUSIONS
-# ============================================================================
 
 
