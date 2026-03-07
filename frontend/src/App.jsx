@@ -123,6 +123,29 @@ function calculateRiskScore(probability) {
   return Math.min(100, scaled).toFixed(1);
 }
 
+// Map the 5-tier risk label to Tailwind colour pairs [bg, text, ring]
+const RISK_COLORS = {
+  "Very Low":  ["bg-emerald-50",  "text-emerald-700",  "border-emerald-200"],
+  "Low":       ["bg-teal-50",     "text-teal-700",     "border-teal-200"],
+  "Moderate":  ["bg-amber-50",    "text-amber-700",    "border-amber-200"],
+  "High":      ["bg-orange-50",   "text-orange-700",   "border-orange-300"],
+  "Critical":  ["bg-red-50",      "text-red-700",      "border-red-300"],
+};
+
+function RiskBadge({ risk }) {
+  const [bg, text, border] = RISK_COLORS[risk] || ["bg-ink-100", "text-ink-600", "border-ink-200"];
+  return (
+    <span
+      className={classNames(
+        "inline-block rounded-full border px-3 py-0.5 text-xs font-bold uppercase tracking-wider",
+        bg, text, border
+      )}
+    >
+      {risk}
+    </span>
+  );
+}
+
 export default function App() {
   const [formState, setFormState] = useState(initialState);
   const [errors, setErrors] = useState("");
@@ -202,7 +225,7 @@ export default function App() {
               Model Suite
             </p>
             <p className="text-sm font-semibold text-ink-700">
-              Logistic Regression, Random Forest, Neural Network
+              Logistic Regression · Random Forest · Neural Network · Ensemble
             </p>
           </div>
         </header>
@@ -306,6 +329,27 @@ export default function App() {
 
               {response ? (
                 <div className="mt-6 space-y-4">
+                  {/* ── Ensemble summary (prominent) ── */}
+                  {response.ensemble && (() => {
+                    const ens = response.ensemble;
+                    const [bg, text, border] = RISK_COLORS[ens.risk] || ["bg-ink-100", "text-ink-600", "border-ink-200"];
+                    return (
+                      <div className={classNames("rounded-2xl border-2 px-5 py-4", bg, border)}>
+                        <p className="text-xs uppercase tracking-[0.2em] opacity-60">Ensemble (weighted)</p>
+                        <div className="mt-1 flex items-center justify-between">
+                          <span className={classNames("text-2xl font-bold", text)}>
+                            {calculateRiskScore(ens.probability)}% risk
+                          </span>
+                          <RiskBadge risk={ens.risk} />
+                        </div>
+                        <p className="mt-1 text-xs opacity-60">
+                          NN 50 % · RF 30 % · LR 20 %
+                        </p>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── Per-model cards ── */}
                   {Object.entries(response.predictions).map(([modelKey, value]) => (
                     <div
                       key={modelKey}
@@ -316,17 +360,12 @@ export default function App() {
                           <p className="text-xs uppercase tracking-[0.2em] text-ink-400">
                             {modelKey.replace(/_/g, " ")}
                           </p>
-                          <p className="text-lg font-semibold text-ink-800">
-                            {value.risk} risk
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-xs uppercase tracking-[0.2em] text-ink-400">
-                            Risk Score
-                          </p>
-                          <p className="text-lg font-semibold text-tide-700">
-                            {calculateRiskScore(value.probability)}%
-                          </p>
+                          <div className="mt-1 flex items-center gap-2">
+                            <p className="text-base font-semibold text-ink-800">
+                              {calculateRiskScore(value.probability)}%
+                            </p>
+                            <RiskBadge risk={value.risk} />
+                          </div>
                         </div>
                       </div>
                       <p className="mt-2 text-sm text-ink-600">

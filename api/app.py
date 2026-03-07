@@ -1,10 +1,13 @@
+import logging
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import joblib
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
@@ -14,6 +17,23 @@ from models.logistic_regression import train_logistic_regression
 from models.neural_network import train_neural_network
 from models.random_forest import train_random_forest
 from preprocessing.data_cleaning import clean_data
+
+# ── Logging ────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+# ── Paths ──────────────────────────────────────────────────────────────────
+MODEL_DIR = Path("models/saved")
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+_LR_PATH  = MODEL_DIR / "lr.joblib"
+_RF_PATH  = MODEL_DIR / "rf.joblib"
+_NN_PATH  = MODEL_DIR / "nn.keras"
+_META_PATH = MODEL_DIR / "meta.joblib"   # encoders, scaler, defaults, ranges, importances
 
 FEATURE_COLUMNS = [
     "gender",
@@ -47,6 +67,13 @@ NUMERIC_COLUMNS = [
 MAX_MISSING_FIELDS = 3
 
 
+_VALID_GENDER   = {"Male", "Female", "Other"}
+_VALID_MARRIED  = {"Yes", "No"}
+_VALID_WORK     = {"Private", "Self-employed", "Govt_job", "children", "Never_worked"}
+_VALID_RESIDENCE = {"Urban", "Rural"}
+_VALID_SMOKING  = {"never smoked", "formerly smoked", "smokes", "Unknown"}
+
+
 class StrokeInput(BaseModel):
     gender: Optional[str] = Field(default=None, examples=["Male"])
     age: Optional[float] = Field(default=None, examples=[67])
@@ -58,6 +85,69 @@ class StrokeInput(BaseModel):
     avg_glucose_level: Optional[float] = Field(default=None, examples=[228.69])
     bmi: Optional[float] = Field(default=None, examples=[36.6])
     smoking_status: Optional[str] = Field(default=None, examples=["formerly smoked"])
+
+    @field_validator("age")
+    @classmethod
+    def validate_age(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and not (0 <= v <= 120):
+            raise ValueError("age must be between 0 and 120")
+        return v
+
+    @field_validator("avg_glucose_level")
+    @classmethod
+    def validate_glucose(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and not (30 <= v <= 600):
+            raise ValueError("avg_glucose_level must be between 30 and 600")
+        return v
+
+    @field_validator("bmi")
+    @classmethod
+    def validate_bmi(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and not (5 <= v <= 100):
+            raise ValueError("bmi must be between 5 and 100")
+        return v
+
+    @field_validator("hypertension", "heart_disease")
+    @classmethod
+    def validate_binary(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v not in (0, 1):
+            raise ValueError("value must be 0 or 1")
+        return v
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in _VALID_GENDER:
+            raise ValueError(f"gender must be one of {sorted(_VALID_GENDER)}")
+        return v
+
+    @field_validator("ever_married")
+    @classmethod
+    def validate_married(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in _VALID_MARRIED:
+            raise ValueError(f"ever_married must be one of {sorted(_VALID_MARRIED)}")
+        return v
+
+    @field_validator("work_type")
+    @classmethod
+    def validate_work(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in _VALID_WORK:
+            raise ValueError(f"work_type must be one of {sorted(_VALID_WORK)}")
+        return v
+
+    @field_validator("Residence_type")
+    @classmethod
+    def validate_residence(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in _VALID_RESIDENCE:
+            raise ValueError(f"Residence_type must be one of {sorted(_VALID_RESIDENCE)}")
+        return v
+
+    @field_validator("smoking_status")
+    @classmethod
+    def validate_smoking(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in _VALID_SMOKING:
+            raise ValueError(f"smoking_status must be one of {sorted(_VALID_SMOKING)}")
+        return v
 
 
 class ModelArtifacts:
@@ -119,7 +209,49 @@ def _prepare_ranges(df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
     return ranges
 
 
+def _models_cached() -> bool:
+    """Return True if all saved model files exist on disk."""
+    return all(p.exists() for p in (_LR_PATH, _RF_PATH, _NN_PATH, _META_PATH))
+
+
+def _save_models() -> None:
+    """Persist trained models and preprocessing artifacts to disk."""
+    logger.info("Saving models to %s …", MODEL_DIR)
+    joblib.dump(ARTIFACTS.models["logistic_regression"], _LR_PATH)
+    joblib.dump(ARTIFACTS.models["random_forest"],       _RF_PATH)
+    ARTIFACTS.models["neural_network"].save(str(_NN_PATH))
+    meta = {
+        "encoders":          ARTIFACTS.encoders,
+        "scaler":            ARTIFACTS.scaler,
+        "feature_defaults":  ARTIFACTS.feature_defaults,
+        "feature_ranges":    ARTIFACTS.feature_ranges,
+        "feature_importance": ARTIFACTS.feature_importance,
+    }
+    joblib.dump(meta, _META_PATH)
+    logger.info("Models saved successfully.")
+
+
+def _load_models() -> None:
+    """Load previously saved models from disk (fast path)."""
+    from tensorflow.keras.models import load_model  # type: ignore
+
+    logger.info("Loading cached models from %s …", MODEL_DIR)
+    meta = joblib.load(_META_PATH)
+    ARTIFACTS.encoders          = meta["encoders"]
+    ARTIFACTS.scaler            = meta["scaler"]
+    ARTIFACTS.feature_defaults  = meta["feature_defaults"]
+    ARTIFACTS.feature_ranges    = meta["feature_ranges"]
+    ARTIFACTS.feature_importance = meta["feature_importance"]
+    ARTIFACTS.models = {
+        "logistic_regression": joblib.load(_LR_PATH),
+        "random_forest":       joblib.load(_RF_PATH),
+        "neural_network":      load_model(str(_NN_PATH)),
+    }
+    logger.info("Cached models loaded successfully.")
+
+
 def _train_models() -> None:
+    logger.info("Training models from scratch (this may take a minute) …")
     df = pd.read_csv("data/stroke.csv")
     df = clean_data(df)
 
@@ -190,6 +322,9 @@ def _train_models() -> None:
         "neural_network": nn_importance,
     }
 
+    _save_models()
+    logger.info("Training complete.")
+
 
 def _clean_input_value(field: str, value: Any) -> Any:
     if value in (None, ""):
@@ -239,12 +374,25 @@ def _preprocess_input(payload: StrokeInput) -> Tuple[np.ndarray, Dict[str, Any],
     return X_scaled, cleaned, missing_fields
 
 
+def _risk_tier(probability: float) -> str:
+    """Map a raw probability to a 5-level clinical risk tier."""
+    if probability < 0.10:
+        return "Very Low"
+    if probability < 0.30:
+        return "Low"
+    if probability < 0.50:
+        return "Moderate"
+    if probability < 0.70:
+        return "High"
+    return "Critical"
+
+
 def _format_probability(probability: float) -> Dict[str, Any]:
     label = 1 if probability >= 0.5 else 0
     return {
         "probability": float(probability),
         "label": label,
-        "risk": "High" if label == 1 else "Low"
+        "risk": _risk_tier(probability),
     }
 
 
@@ -271,6 +419,12 @@ def _overall_top_feature(feature_list: List[str]) -> str:
 
 @app.on_event("startup")
 def startup_event() -> None:
+    if _models_cached():
+        try:
+            _load_models()
+            return
+        except Exception as exc:
+            logger.warning("Cache load failed (%s). Re-training …", exc)
     _train_models()
 
 
@@ -288,6 +442,18 @@ def metadata() -> Dict[str, Any]:
     }
 
 
+@app.get("/health")
+def health() -> Dict[str, Any]:
+    """Liveness check — returns model readiness and names of loaded models."""
+    loaded = list(ARTIFACTS.models.keys())
+    ready  = len(loaded) == 3
+    return {
+        "status": "ok" if ready else "initializing",
+        "models_loaded": loaded,
+        "ready": ready,
+    }
+
+
 @app.post("/predict")
 def predict(payload: StrokeInput) -> Dict[str, Any]:
     X_scaled, cleaned, missing = _preprocess_input(payload)
@@ -302,6 +468,14 @@ def predict(payload: StrokeInput) -> Dict[str, Any]:
     lr_prob = ARTIFACTS.models["logistic_regression"].predict_proba(X_scaled)[0, 1]
     rf_prob = ARTIFACTS.models["random_forest"].predict_proba(X_scaled)[0, 1]
     nn_prob = float(ARTIFACTS.models["neural_network"].predict(X_scaled, verbose=0)[0, 0])
+
+    # Weighted ensemble: NN carries the most weight; LR is the most interpretable anchor.
+    _WEIGHTS = {"logistic_regression": 0.20, "random_forest": 0.30, "neural_network": 0.50}
+    ensemble_prob = (
+        _WEIGHTS["logistic_regression"] * float(lr_prob)
+        + _WEIGHTS["random_forest"]       * float(rf_prob)
+        + _WEIGHTS["neural_network"]      * float(nn_prob)
+    )
 
     model_predictions = {
         "logistic_regression": _format_probability(float(lr_prob)),
@@ -321,6 +495,10 @@ def predict(payload: StrokeInput) -> Dict[str, Any]:
         "input": cleaned,
         "missing_fields": missing,
         "predictions": model_predictions,
+        "ensemble": {
+            **_format_probability(ensemble_prob),
+            "weights": _WEIGHTS,
+        },
         "top_features": top_features,
         "most_influential_feature": {
             "feature": overall_top,
